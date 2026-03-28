@@ -9,3 +9,6 @@ app = create_fastapi_app(
     action_cls=CloudCostAction, 
     observation_cls=CloudCostObservation
 )
+@app.get("/")
+def read_root():
+    return RedirectResponse(url="/docs")
