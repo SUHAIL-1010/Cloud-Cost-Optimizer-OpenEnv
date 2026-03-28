@@ -2,9 +2,12 @@ name: "Cloud Cost Optimizer"
 description: "Agent manages server infrastructure to optimize costs safely."
 version: "1.0.0"
 
-# This is what the grading robot was looking for!
 server:
   port: 7860
+
+# Add this block! This tells the grader exactly how to trigger your AI.
+agent:
+  command: "python inference.py"
 
 tasks:
   - name: "easy_cost_cut"
