@@ -18,6 +18,8 @@ The agent must reply with a decision string:
 * `downgrade`: Reduces server capacity (Moderate reward for medium-load servers).
 * `keep`: Leaves the server running (Neutral/No reward).
 
+[🚀 Live Environment on Hugging Face]
+(https://huggingface.co/spaces/suhail10102005/cloud-cost-optimizer-openenv)
 ## 🏆 Reward Function & Grader
 The environment utilizes dense, partial-progress rewards:
 * **+1.0** for correctly terminating an idle, non-critical server.
