@@ -1,5 +1,4 @@
 # server/app.py
-from fastapi.responses import RedirectResponse
 from openenv.core.env_server import create_fastapi_app
 from models import CloudCostAction, CloudCostObservation
 from server.environment import CloudCostEnvironment
@@ -10,6 +9,7 @@ app = create_fastapi_app(
     observation_cls=CloudCostObservation
 )
 
+# Return a simple health check dictionary instead of a redirect!
 @app.get("/")
 def read_root():
-    return RedirectResponse(url="/docs")
+    return {"status": "ok", "message": "Environment is successfully running"}
