@@ -5,6 +5,7 @@ class CloudCostAction(Action):
     decision: str 
 
 class CloudCostObservation(Observation):
+    hourly_cost: float
     server_id: str
     cpu_usage: int
     is_critical: bool
