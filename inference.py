@@ -5,19 +5,21 @@ from openai import AsyncOpenAI
 from client import CloudCostClient
 from models import CloudCostAction
 
-# 1. Grader-proof fallback key
+# FIX: We now use the exact environment variables the hackathon grader injects!
+# If we are testing locally, it falls back to your Gemini URL. 
+api_key = os.environ.get("API_KEY", os.environ.get("GEMINI_API_KEY", "dummy_key"))
+base_url = os.environ.get("API_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+
 client = AsyncOpenAI(
-    api_key=os.environ.get("GEMINI_API_KEY", "dummy_key_to_prevent_crashes"),
-    base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+    api_key=api_key,
+    base_url=base_url
 )
 
 async def run_baseline():
     task_name = "easy_cost_cut"
     
-    # REQUIRED: Print the [START] block
     print(f"[START] task={task_name}", flush=True)
     
-    # 2. Grader-proof dynamic URL
     env_url = os.environ.get("OPENENV_BASE_URL", "http://127.0.0.1:7860")
     env_client = CloudCostClient(base_url=env_url)
     
@@ -35,14 +37,10 @@ async def run_baseline():
             f"Reply ONLY with one exact word: 'terminate', 'downgrade', or 'keep'."
         )
         
-        # 3. Grader-proof Try/Except
         try:
-            messages = [
-            {"role": "system", "content": "You are a Senior Cloud SRE at Meta. Your job is to aggressively cut cloud costs by terminating idle servers (CPU < 10%) and downgrading underutilized ones (CPU < 40%). However, your #1 rule is NEVER terminate a critical database, regardless of its CPU usage. Respond ONLY with: terminate, downgrade, or keep."},
-            {"role": "user", "content": f"Server: {obs.server_id} | CPU: {obs.cpu_usage}% | Critical DB: {obs.is_critical}"}]
             response = await client.chat.completions.create(
                 model="gemini-2.5-flash",
-                messages=messages,
+                messages=[{"role": "user", "content": prompt}],
                 temperature=0.0
             )
             decision = response.choices[0].message.content.strip().lower()
@@ -56,21 +54,17 @@ async def run_baseline():
         obs = await env_client.step(action)
         done = obs.done
         
-        # REQUIRED: Print the [STEP] block
         print(f"[STEP] step={step_count} reward={obs.reward}", flush=True)
 
     final_state = await env_client.state()
     
-    # Calculate the final score based on your OpenEnv rules (between 0.0 and 1.0)
     final_score = 0.0
     if final_state.total_servers > 0:
         final_score = final_state.money_saved / final_state.total_servers
     
-    # Instant 0 if a critical database was terminated
     if final_state.penalties > 0:
         final_score = 0.0
 
-    # REQUIRED: Print the [END] block
     print(f"[END] task={task_name} score={final_score} steps={step_count}", flush=True)
 
 if __name__ == "__main__":
