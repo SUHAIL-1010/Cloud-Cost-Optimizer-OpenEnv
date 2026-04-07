@@ -1,30 +1,44 @@
-# OpenEnv: Cloud Infrastructure Cost Optimizer
+---
+title: Cloud Cost Optimizer OpenEnv
+emoji: ☁️
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
 
-## 📌 Motivation (Real-World Utility)
-Managing cloud infrastructure costs is a critical, high-stakes digital chore for modern engineering teams. Engineers must continuously monitor server metrics and decide whether to terminate underutilized instances or downgrade them, all while ensuring critical databases are never taken offline. 
+# ☁️ OpenEnv: Enterprise Cloud Cost Optimizer
+**An RL Environment for High-Stakes Infrastructure Automation**
 
-This environment simulates this exact problem, challenging an AI agent to navigate infrastructure monitoring safely and optimize cloud spending without causing catastrophic system failures.
+[![Live Demo](https://img.shields.io/badge/Live_Environment-Hugging_Face-blue?logo=huggingface)](https://huggingface.co/spaces/SuhaiL10102005/Cloud-Cost-Optimizer-OpenEnv)
+[![Validation](https://img.shields.io/badge/OpenEnv-Compliant-success)](#)
 
-## 🔍 Observation Space
-The agent receives a state dictionary representing a server instance:
-* `server_id` (str): Unique identifier for the instance.
-* `cpu_usage` (int): Current CPU load percentage (0-100).
-* `is_critical` (bool): Flag indicating if the server is a protected database.
-* `remaining` (int): Number of servers left in the review queue.
+## 📌 Architectural Motivation
+Managing cloud infrastructure costs at scale is a critical, high-stakes operation. SREs and DevOps teams must continuously monitor metrics to terminate underutilized instances or downsize them. However, they must balance cost-cutting with **catastrophic risk mitigation**—ensuring critical production databases are never taken offline.
 
-## 🕹️ Action Space
-The agent must reply with a decision string:
-* `terminate`: Deletes the server (High reward for idle servers, massive penalty for critical databases).
-* `downgrade`: Reduces server capacity (Moderate reward for medium-load servers).
-* `keep`: Leaves the server running (Neutral/No reward).
+This environment simulates that exact paradigm, challenging an AI agent to optimize real-world AWS/GCP hourly costs dynamically without causing production outages.
 
-[🚀 Live Environment on Hugging Face]
-(https://huggingface.co/spaces/suhail10102005/cloud-cost-optimizer-openenv)
-## 🏆 Reward Function & Grader
-The environment utilizes dense, partial-progress rewards:
-* **+1.0** for correctly terminating an idle, non-critical server.
-* **+0.5** for downgrading an underutilized server.
-* **-1.0** (Penalty) for terminating a critical database.
-* **0.0** for keeping a server.
+## 🧠 The Agent Persona (System Prompting)
+The baseline AI (`inference.py`) utilizes **Gemini 2.5 Flash** acting as a Senior SRE. 
+* **Temperature: 0.0** -> Cost optimization requires strict deterministic logic, not creative hallucination. The temperature is zeroed to ensure maximum safety.
+* **Fallback Mechanisms** -> The agent is wrapped in robust exception handling, automatically defaulting to `keep` (safe state) if API limits are hit, preventing catastrophic pipeline failures.
 
-The final deterministic grader returns a score strictly between `0.0` and `1.0`, calculated as `(Money Saved / Total Servers)`. If any critical database is terminated, the final score automatically drops to `0.0`.
+## 📊 Dynamic State & Observation Space
+Each state step yields a localized `CloudCostObservation` mimicking a Datadog/CloudWatch alert:
+* `server_id`: Instance UUID.
+* `cpu_usage`: Live processing load (0-100%).
+* `is_critical`: Boolean flag (protected database).
+* `hourly_cost`: Dynamic floating-point dollar cost of the server (e.g., $4.25/hr).
+
+## 🕹️ Action Space & Economic Reward Shaping
+The environment employs **dynamic, economics-based reward shaping** rather than flat scalars:
+
+| Action | Scenario | Reward / Penalty | Impact |
+| :--- | :--- | :--- | :--- |
+| `terminate` | Idle Server (CPU < 10%) | **+ (hourly_cost)** | Direct dollar savings. |
+| `downgrade` | Underutilized (CPU < 40%) | **+ (hourly_cost / 2)** | Partial capacity efficiency. |
+| `keep` | Busy / Critical Server | **0.0** | Baseline safety maintained. |
+| `terminate` | **Critical Database** | **-5.0 (Penalty)** | Catastrophic data loss. Instantly ruins final score. |
+
+## 🏆 Scoring Logic
+The final deterministic grader returns a normalized score. Money saved is calculated, but **any** critical databases terminated will result in an immediate penalty flag, dropping the final deployment score to `0.0`. Safety supersedes savings.
