@@ -5,67 +5,83 @@ from openai import AsyncOpenAI
 from client import CloudCostClient
 from models import CloudCostAction
 
-# FIX: We now use the exact environment variables the hackathon grader injects!
-# If we are testing locally, it falls back to your Gemini URL. 
-api_key = os.environ.get("API_KEY", os.environ.get("GEMINI_API_KEY", "dummy_key"))
-base_url = os.environ.get("API_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
+HF_TOKEN = os.getenv("HF_TOKEN")
 
-client = AsyncOpenAI(
-    api_key=api_key,
-    base_url=base_url
-)
+if not HF_TOKEN:
+    HF_TOKEN = os.getenv("GEMINI_API_KEY", "dummy_key")
+
+client = AsyncOpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
 async def run_baseline():
-    task_name = "easy_cost_cut"
-    
-    print(f"[START] task={task_name}", flush=True)
-    
+    tasks = ["easy_cost_cut", "medium_cost_cut", "hard_cost_cut"]
     env_url = os.environ.get("OPENENV_BASE_URL", "http://127.0.0.1:7860")
     env_client = CloudCostClient(base_url=env_url)
     
-    obs = await env_client.reset()
-    done = False
-    step_count = 0
-
-    while not done:
-        step_count += 1
-        prompt = (
-            f"You are a Senior DevOps SRE. "
-            f"Server '{obs.server_id}' costs ${obs.hourly_cost}/hr and has {obs.cpu_usage}% CPU usage. "
-            f"Is it a critical database? {obs.is_critical}. "
-            f"Your strict rule: NEVER terminate a critical database. Cut costs where safe. "
-            f"Reply ONLY with one exact word: 'terminate', 'downgrade', or 'keep'."
-        )
+    for task_name in tasks:
+        print(f"[START] task={task_name} env=cloud_cost_optimizer model={MODEL_NAME}", flush=True)
         
-        try:
-            response = await client.chat.completions.create(
-                model="gemini-2.5-flash",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0
+        obs = await env_client.reset()
+        done = False
+        step_count = 0
+        rewards_history = []
+
+        while not done:
+            step_count += 1
+            
+            # ADVANCED CHAIN OF THOUGHT PROMPT
+            # Just add the "Your goal is to save as much money as possible" line!
+            prompt = (
+                f"You are managing the '{obs.cluster_name}' Kubernetes cluster.\n"
+                f"Target Server ID: '{obs.server_id}' (Critical DB: {obs.is_critical}). Cost: ${obs.hourly_cost}/hr.\n"
+                f"Cluster State: {obs.cluster_active_nodes} active nodes handling {obs.cluster_total_traffic} total traffic.\n"
+                f"Current CPU per node: {obs.current_cpu_usage}%.\n\n"
+                f"RULES:\n"
+                f"1. NEVER terminate/downgrade a Critical DB.\n"
+                f"2. Traffic redistributes! If you terminate this server, the new CPU for remaining nodes will be: "
+                f"(Total Traffic / (Active Nodes - 1)) / Node Capacity * 100.\n"
+                f"3. If the new CPU would exceed 100%, you MUST reply 'keep' to prevent a cluster outage.\n"
+                f"4. If the new CPU is safely under 100%, you MUST reply 'terminate' to save money. Your goal is to maximize cost savings!\n\n"
+                f"First, calculate the new CPU if terminated. Then, output your final decision as a SINGLE WORD on the very last line: terminate, downgrade, or keep."
             )
-            decision = response.choices[0].message.content.strip().lower()
-        except Exception as e:
-            decision = "keep"
+            
+            try:
+                response = await client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=[
+                        {"role": "system", "content": "You are a Senior Cloud Architect. Think step by step, then provide your final action word."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.0
+                )
+                raw_response = response.choices[0].message.content.strip().lower()
+                
+                # Extract just the action word from the AI's complex reasoning
+                if "terminate" in raw_response.split('\n')[-1]: decision = "terminate"
+                elif "downgrade" in raw_response.split('\n')[-1]: decision = "downgrade"
+                else: decision = "keep"
+                
+            except Exception as e:
+                decision = "keep"
+            
+            action = CloudCostAction(server_id=obs.server_id, decision=decision)
+            obs = await env_client.step(action)
+            done = obs.done
+            rewards_history.append(f"{obs.reward:.2f}")
+            
+            print(f"[STEP] step={step_count} action={decision} reward={obs.reward:.2f} done={str(done).lower()} error=null", flush=True)
 
-        if decision not in ["terminate", "downgrade", "keep"]: 
-            decision = "keep"
+        final_state = await env_client.state()
         
-        action = CloudCostAction(server_id=obs.server_id, decision=decision)
-        obs = await env_client.step(action)
-        done = obs.done
-        
-        print(f"[STEP] step={step_count} reward={obs.reward}", flush=True)
+        # Scoring logic
+        raw_score = final_state.money_saved / final_state.max_possible_savings if final_state.max_possible_savings > 0 else 0
+        clamped_score = max(0.01, min(0.99, raw_score))
+        if not final_state.success: 
+            clamped_score = 0.01
 
-    final_state = await env_client.state()
-    
-    final_score = 0.0
-    if final_state.total_servers > 0:
-        final_score = final_state.money_saved / final_state.total_servers
-    
-    if final_state.penalties > 0:
-        final_score = 0.0
-
-    print(f"[END] task={task_name} score={final_score} steps={step_count}", flush=True)
+        rewards_str = ",".join(rewards_history)
+        print(f"[END] success={str(final_state.success).lower()} steps={step_count} rewards={rewards_str}", flush=True)
 
 if __name__ == "__main__":
     asyncio.run(run_baseline())
