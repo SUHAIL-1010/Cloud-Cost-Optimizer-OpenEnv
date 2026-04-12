@@ -30,11 +30,9 @@ async def run_baseline():
         while not done:
             step_count += 1
             
-            # ADVANCED CHAIN OF THOUGHT PROMPT
-            # Just add the "Your goal is to save as much money as possible" line!
             prompt = (
                 f"You are managing the '{obs.cluster_name}' Kubernetes cluster.\n"
-                f"Target Server ID: '{obs.server_id}' (Critical DB: {obs.is_critical}). Cost: ${obs.hourly_cost}/hr.\n"
+                f"Target Server ID: '{obs.server_id}' (Critical DB: {obs.is_critical_db}). Cost: ${obs.hourly_cost}/hr.\n"
                 f"Cluster State: {obs.cluster_active_nodes} active nodes handling {obs.cluster_total_traffic} total traffic.\n"
                 f"Current CPU per node: {obs.current_cpu_usage}%.\n\n"
                 f"RULES:\n"
@@ -43,7 +41,7 @@ async def run_baseline():
                 f"(Total Traffic / (Active Nodes - 1)) / Node Capacity * 100.\n"
                 f"3. If the new CPU would exceed 100%, you MUST reply 'keep' to prevent a cluster outage.\n"
                 f"4. If the new CPU is safely under 100%, you MUST reply 'terminate' to save money. Your goal is to maximize cost savings!\n\n"
-                f"First, calculate the new CPU if terminated. Then, output your final decision as a SINGLE WORD on the very last line: terminate, downgrade, or keep."
+                f"First, calculate the new CPU if terminated. Then, output your final decision as a SINGLE WORD on the last line: terminate, downgrade, or keep."
             )
             
             try:
@@ -57,7 +55,6 @@ async def run_baseline():
                 )
                 raw_response = response.choices[0].message.content.strip().lower()
                 
-                # Extract just the action word from the AI's complex reasoning
                 if "terminate" in raw_response.split('\n')[-1]: decision = "terminate"
                 elif "downgrade" in raw_response.split('\n')[-1]: decision = "downgrade"
                 else: decision = "keep"
@@ -74,12 +71,6 @@ async def run_baseline():
 
         final_state = await env_client.state()
         
-        # Scoring logic
-        raw_score = final_state.money_saved / final_state.max_possible_savings if final_state.max_possible_savings > 0 else 0
-        clamped_score = max(0.01, min(0.99, raw_score))
-        if not final_state.success: 
-            clamped_score = 0.01
-
         rewards_str = ",".join(rewards_history)
         print(f"[END] success={str(final_state.success).lower()} steps={step_count} rewards={rewards_str}", flush=True)
 

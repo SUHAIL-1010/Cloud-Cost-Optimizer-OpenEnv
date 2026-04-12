@@ -8,7 +8,6 @@ class CloudCostEnvironment(Environment):
         self.reset_simulation()
 
     def reset_simulation(self):
-        # Initialize 3 distinct Kubernetes Clusters with live traffic loads
         self.clusters = {
             "Frontend-Web": {"traffic": 350.0, "nodes": 5, "capacity_per_node": 100},
             "Backend-API": {"traffic": 220.0, "nodes": 4, "capacity_per_node": 100},
@@ -18,7 +17,6 @@ class CloudCostEnvironment(Environment):
         self.queue = []
         server_id_counter = 1
         
-        # Populate the servers into the queue based on the clusters
         for cluster_name, data in self.clusters.items():
             for _ in range(data["nodes"]):
                 self.queue.append({
@@ -30,18 +28,17 @@ class CloudCostEnvironment(Environment):
                 })
                 server_id_counter += 1
                 
-        # Shuffle the queue to make it unpredictable
         random.shuffle(self.queue)
         
         self.money_saved = 0.0
         self.outages = 0
         self.total_servers = len(self.queue)
-        # Approximate perfection (terminating all safe redundancy)
         self.max_possible_savings = sum(s["hourly_cost"] for s in self.queue) * 0.4 
 
     def reset(self) -> CloudCostObservation:
         self.reset_simulation()
-        return self._get_observation(reward=0.0, done=False)
+        # Starting with a normalized 0.01
+        return self._get_observation(reward=0.01, done=False)
 
     def _get_observation(self, reward: float, done: bool) -> CloudCostObservation:
         if not self.queue:
@@ -55,7 +52,6 @@ class CloudCostEnvironment(Environment):
         c_name = current["cluster"]
         cluster_data = self.clusters[c_name]
         
-        # DYNAMIC MATH: CPU is calculated in real-time based on active nodes
         current_cpu = (cluster_data["traffic"] / cluster_data["nodes"]) / cluster_data["capacity_per_node"] * 100
 
         return CloudCostObservation(
@@ -75,50 +71,47 @@ class CloudCostEnvironment(Environment):
 
     def step(self, action: CloudCostAction) -> CloudCostObservation:
         if not self.queue:
-            return self._get_observation(reward=0.0, done=True)
+            return self._get_observation(reward=0.01, done=True)
 
         current = self.queue.pop(0)
         c_name = current["cluster"]
         cluster_data = self.clusters[c_name]
-        reward = 0.0
+        
+        # NORMALIZED REWARDS TO STAY STRICTLY BETWEEN 0 AND 1
+        reward = 0.02 # Base reward for a safe "keep" action
 
         if action.decision == "terminate":
             if current["is_critical"]:
-                reward = -10.0 # Catastrophic failure
+                reward = 0.01 # Penalty (Avoid 0.0)
                 self.outages += 1
             else:
-                # SIMULATE THE CONSEQUENCE: Traffic redistributes!
                 simulated_nodes = cluster_data["nodes"] - 1
                 if simulated_nodes == 0:
-                    new_cpu = 999 # Complete cluster crash
+                    reward = 0.01 # Penalty
+                    self.outages += 1
                 else:
                     new_cpu = (cluster_data["traffic"] / simulated_nodes) / cluster_data["capacity_per_node"] * 100
-                
-                if new_cpu > 100.0:
-                    # AI caused an outage by overloading the remaining servers
-                    reward = -5.0
-                    self.outages += 1
-                    # Do not actually terminate it, the system protected itself
-                else:
-                    # Success! Safe termination.
-                    cluster_data["nodes"] -= 1 # Officially remove it from the cluster
-                    reward = current["hourly_cost"]
-                    self.money_saved += reward
+                    if new_cpu > 100.0:
+                        reward = 0.01 # Penalty for overloading
+                        self.outages += 1
+                    else:
+                        cluster_data["nodes"] -= 1
+                        reward = 0.08 # Max success!
+                        self.money_saved += current["hourly_cost"]
 
         elif action.decision == "downgrade":
             if current["is_critical"]:
-                reward = -2.0
+                reward = 0.01 # Penalty
             else:
-                # Downgrading reduces the capacity of THIS node
                 simulated_capacity = cluster_data["capacity_per_node"] * 0.5
                 new_cpu = (cluster_data["traffic"] / cluster_data["nodes"]) / simulated_capacity * 100
                 
                 if new_cpu > 100.0:
-                    reward = -2.0 # Cannot downgrade, load is too high
+                    reward = 0.01 # Penalty
                 else:
                     cluster_data["capacity_per_node"] = simulated_capacity
-                    reward = current["hourly_cost"] * 0.5
-                    self.money_saved += reward
+                    reward = 0.05 # Good success
+                    self.money_saved += current["hourly_cost"] * 0.5
 
         done = len(self.queue) == 0
         return self._get_observation(reward=round(reward, 2), done=done)
